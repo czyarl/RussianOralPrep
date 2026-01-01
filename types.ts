@@ -23,3 +23,5 @@ export enum CardState {
   LISTENING = 'LISTENING',
   REVEALED = 'REVEALED'
 }
+
+export type Gender = 'M' | 'F';

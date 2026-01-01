@@ -1,20 +1,20 @@
 import React from 'react';
-import { HistoryMap } from '../types';
-import { QUESTIONS } from '../constants';
+import { HistoryMap, QuestionData } from '../types';
 
 interface Props {
   history: HistoryMap;
+  questions: QuestionData[];
 }
 
-const ProgressBar: React.FC<Props> = ({ history }) => {
-  const total = QUESTIONS.length;
+const ProgressBar: React.FC<Props> = ({ history, questions }) => {
+  const total = questions.length;
   let mastered = 0;
   let learning = 0;
 
-  QUESTIONS.forEach(q => {
+  questions.forEach(q => {
     const stats = history[q.id];
     if (stats) {
-      // Simple heuristic: If accuracy > 80% and attempts > 2, it's mastered
+      // Simple heuristic: If accuracy > 80% and attempts >= 2, it's mastered
       if (stats.attempts >= 1) {
           const accuracy = stats.correct / stats.attempts;
           if (accuracy > 0.8 && stats.attempts >= 2) {

@@ -5,11 +5,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Russian Oral Prep</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Import PT Sans and PT Serif, which have excellent Cyrillic diacritic support -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=PT+Sans:ital,wght@0,400;0,700;1,400&family=PT+Serif:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+    
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['"PT Sans"', 'sans-serif'],
+              serif: ['"PT Serif"', 'serif'],
+            }
+          }
+        }
+      }
+    </script>
     <style>
       body {
-        font-family: 'Inter', sans-serif;
+        /* Ensure PT Sans is the base font */
+        font-family: 'PT Sans', sans-serif;
         background-color: #f3f4f6;
+      }
+      
+      /* Optional: tweaks for stress mark positioning if font rendering is still slightly off in some browsers */
+      .stress-mark {
+        position: relative;
+        left: -0.1em;
       }
     </style>
   <script type="importmap">

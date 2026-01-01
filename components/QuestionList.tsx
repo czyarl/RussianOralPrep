@@ -1,16 +1,16 @@
 import React from 'react';
 import { X, CheckCircle, Clock, Circle } from 'lucide-react';
-import { QUESTIONS } from '../constants';
-import { HistoryMap } from '../types';
+import { HistoryMap, QuestionData } from '../types';
 
 interface Props {
   history: HistoryMap;
   onSelect: (id: number) => void;
   onClose: () => void;
   currentId: number;
+  questions: QuestionData[];
 }
 
-const QuestionList: React.FC<Props> = ({ history, onSelect, onClose, currentId }) => {
+const QuestionList: React.FC<Props> = ({ history, onSelect, onClose, currentId, questions }) => {
   const getStatus = (id: number) => {
     const stats = history[id];
     if (!stats || stats.attempts === 0) return 'unattempted';
@@ -32,7 +32,7 @@ const QuestionList: React.FC<Props> = ({ history, onSelect, onClose, currentId }
       </div>
       
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {QUESTIONS.map((q) => {
+        {questions.map((q) => {
           const status = getStatus(q.id);
           const isCurrent = q.id === currentId;
           const stats = history[q.id];

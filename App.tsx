@@ -1,10 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { QUESTIONS } from './constants';
-import { StudyMode, CardState, HistoryMap, QuestionData } from './types';
-import { getHistory, saveAttempt, resetHistory, getCustomAnswers, saveCustomAnswer } from './services/storage';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { getQuestions } from './constants';
+import { StudyMode, CardState, HistoryMap, QuestionData, Gender } from './types';
+import { 
+    getHistory, saveAttempt, resetHistory, 
+    getCustomAnswers, saveCustomAnswer, 
+    getPreferredVoiceURI, savePreferredVoiceURI,
+    getPreferredRate, savePreferredRate,
+    getPreferredGender, savePreferredGender
+} from './services/storage';
 import { selectNextQuestion } from './services/algorithm';
-import { speakRussian } from './services/tts';
-import { Volume2, RefreshCw, Brain, Eye, CheckCircle, XCircle, RotateCcw, Edit2, Save, X, Undo2, LayoutList } from 'lucide-react';
+import { speakRussian, GOOGLE_VOICE_URI, VoiceOption } from './services/tts';
+import { Volume2, RefreshCw, Brain, Eye, CheckCircle, XCircle, RotateCcw, Edit2, Save, X, Undo2, LayoutList, Highlighter, Mic, Gauge, User } from 'lucide-react';
 import ProgressBar from './components/ProgressBar';
 import QuestionList from './components/QuestionList';
 
@@ -17,32 +23,106 @@ const App: React.FC = () => {
   const [autoPlay, setAutoPlay] = useState(true);
   const [showList, setShowList] = useState(false);
   
+  // Settings State
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
+  const [speechRate, setSpeechRate] = useState<number>(0.9);
+  const [gender, setGender] = useState<Gender>('M');
+  
   // Editing state
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initialize
+  // Derived data
+  const questions = useMemo(() => getQuestions(gender), [gender]);
+
+  // Initialize Data
   useEffect(() => {
     const loadedHistory = getHistory();
     const loadedCustomAnswers = getCustomAnswers();
     setHistory(loadedHistory);
     setCustomAnswers(loadedCustomAnswers);
-
-    // Initial pick
-    const firstQ = selectNextQuestion(QUESTIONS, loadedHistory, mode);
+    
+    // Load prefs
+    setSpeechRate(getPreferredRate());
+    const savedGender = getPreferredGender();
+    setGender(savedGender);
+    
+    // Initial pick uses the saved gender immediately
+    const initialQuestions = getQuestions(savedGender);
+    const firstQ = selectNextQuestion(initialQuestions, loadedHistory, mode);
     setCurrentQuestion(firstQ);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Initialize Voices
+  useEffect(() => {
+      const loadVoices = () => {
+          const allVoices = window.speechSynthesis.getVoices();
+          // Filter for Russian voices
+          const ruVoices = allVoices.filter(v => v.lang.toLowerCase().includes('ru'));
+          setVoices(ruVoices);
+
+          // Try to restore saved preference
+          const savedURI = getPreferredVoiceURI();
+          
+          // Check if saved URI matches a browser voice OR is our special Google one
+          const savedVoiceExists = ruVoices.find(v => v.voiceURI === savedURI);
+          
+          if (savedURI === GOOGLE_VOICE_URI) {
+             setSelectedVoiceURI(GOOGLE_VOICE_URI);
+          } else if (savedURI && savedVoiceExists) {
+              setSelectedVoiceURI(savedURI);
+          } else if (ruVoices.length > 0) {
+              // Default to first available Russian voice
+              setSelectedVoiceURI(ruVoices[0].voiceURI);
+          } else {
+              // No Russian browser voices? Default to Google Online if nothing else
+              setSelectedVoiceURI(GOOGLE_VOICE_URI);
+          }
+      };
+
+      loadVoices();
+      
+      // Chrome loads voices asynchronously
+      if (window.speechSynthesis.onvoiceschanged !== undefined) {
+          window.speechSynthesis.onvoiceschanged = loadVoices;
+      }
+      
+      return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
+  // Update current question object when gender changes (if current ID exists)
+  useEffect(() => {
+      if (currentQuestion) {
+          const updatedQ = questions.find(q => q.id === currentQuestion.id);
+          if (updatedQ) {
+              setCurrentQuestion(updatedQ);
+          }
+      }
+  }, [gender, questions]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const getActiveVoice = (): VoiceOption | SpeechSynthesisVoice | null => {
+      if (selectedVoiceURI === GOOGLE_VOICE_URI) {
+          return {
+              name: 'Google Translate (Online)',
+              voiceURI: GOOGLE_VOICE_URI,
+              lang: 'ru-RU'
+          };
+      }
+      return voices.find(v => v.voiceURI === selectedVoiceURI) || null;
+  }
 
   // Handle TTS Autoplay
   useEffect(() => {
     if (autoPlay && currentQuestion && cardState === CardState.LISTENING && !showList) {
       // Small timeout to allow UI to settle
       const timer = setTimeout(() => {
-        speakRussian(currentQuestion.question);
+        speakRussian(currentQuestion.question, getActiveVoice(), speechRate);
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [currentQuestion, cardState, autoPlay, showList]);
+  }, [currentQuestion, cardState, autoPlay, showList, selectedVoiceURI, voices, speechRate]); // Re-run if voice/rate changes
 
   const handleNext = useCallback((isCorrect: boolean) => {
     if (!currentQuestion) return;
@@ -54,11 +134,11 @@ const App: React.FC = () => {
     const newHistory = saveAttempt(currentQuestion.id, isCorrect);
     setHistory(newHistory);
 
-    // Pick next
-    const nextQ = selectNextQuestion(QUESTIONS, newHistory, mode, currentQuestion.id);
+    // Pick next using the CURRENT questions list (which respects gender)
+    const nextQ = selectNextQuestion(questions, newHistory, mode, currentQuestion.id);
     setCurrentQuestion(nextQ);
     setCardState(CardState.LISTENING);
-  }, [currentQuestion, mode]);
+  }, [currentQuestion, mode, questions]);
 
   const handleReveal = () => {
     setCardState(CardState.REVEALED);
@@ -66,7 +146,35 @@ const App: React.FC = () => {
 
   const handlePlayAudio = (e: React.MouseEvent, text: string) => {
     e.stopPropagation();
-    speakRussian(text);
+    speakRussian(text, getActiveVoice(), speechRate);
+  };
+
+  const handleVoiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const uri = e.target.value;
+      setSelectedVoiceURI(uri);
+      savePreferredVoiceURI(uri);
+      
+      // Preview new voice
+      let newVoice: VoiceOption | SpeechSynthesisVoice | null = null;
+      if (uri === GOOGLE_VOICE_URI) {
+          newVoice = { name: 'Google Translate', voiceURI: GOOGLE_VOICE_URI, lang: 'ru-RU' };
+      } else {
+          newVoice = voices.find(v => v.voiceURI === uri) || null;
+      }
+      
+      speakRussian("Проверка звука", newVoice, speechRate);
+  }
+
+  const handleRateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newRate = parseFloat(e.target.value);
+      setSpeechRate(newRate);
+      savePreferredRate(newRate);
+  };
+
+  const handleGenderToggle = () => {
+      const newGender = gender === 'M' ? 'F' : 'M';
+      setGender(newGender);
+      savePreferredGender(newGender);
   };
 
   const toggleMode = () => {
@@ -108,8 +216,25 @@ const App: React.FC = () => {
       }
   }
 
+  const handleInsertStress = () => {
+    if (textareaRef.current) {
+        const start = textareaRef.current.selectionStart;
+        const end = textareaRef.current.selectionEnd;
+        const newText = editText.slice(0, start) + '\u0301' + editText.slice(end);
+        setEditText(newText);
+        
+        // Restore focus and move cursor after the stress mark
+        setTimeout(() => {
+            if(textareaRef.current) {
+                textareaRef.current.focus();
+                textareaRef.current.setSelectionRange(start + 1, start + 1);
+            }
+        }, 0);
+    }
+  };
+
   const handleQuestionSelect = (id: number) => {
-      const q = QUESTIONS.find(q => q.id === id);
+      const q = questions.find(q => q.id === id);
       if (q) {
           setCurrentQuestion(q);
           setCardState(CardState.LISTENING);
@@ -128,6 +253,7 @@ const App: React.FC = () => {
       {showList && (
         <QuestionList 
             history={history}
+            questions={questions}
             currentId={currentQuestion.id}
             onSelect={handleQuestionSelect}
             onClose={() => setShowList(false)}
@@ -157,7 +283,7 @@ const App: React.FC = () => {
             </div>
           </div>
           
-          <ProgressBar history={history} />
+          <ProgressBar history={history} questions={questions} />
           
           <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-gray-100">
             <div className="flex items-center gap-2">
@@ -254,24 +380,34 @@ const App: React.FC = () => {
                         {isEditing ? (
                             <div className="bg-gray-50 p-3 rounded-lg border border-blue-200 space-y-3">
                                 <textarea 
+                                    ref={textareaRef}
                                     value={editText}
                                     onChange={(e) => setEditText(e.target.value)}
                                     className="w-full p-2 border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:outline-none min-h-[100px] text-lg font-medium"
                                     placeholder="输入你的回答..."
                                 />
-                                <div className="flex justify-end gap-2">
+                                <div className="flex justify-between items-center">
                                     <button 
-                                        onClick={handleCancelEdit}
-                                        className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-50 text-sm"
+                                        onClick={handleInsertStress}
+                                        className="flex items-center gap-1 px-3 py-1.5 bg-gray-100 text-gray-700 border border-gray-200 rounded hover:bg-gray-200 text-sm font-serif"
+                                        title="在光标处插入重音符号"
                                     >
-                                        <X size={14} /> 取消
+                                        <Highlighter size={14} /> 插入重音 ( ́ )
                                     </button>
-                                    <button 
-                                        onClick={handleSaveEdit}
-                                        className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                                    >
-                                        <Save size={14} /> 保存
-                                    </button>
+                                    <div className="flex gap-2">
+                                        <button 
+                                            onClick={handleCancelEdit}
+                                            className="flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-300 text-gray-600 rounded hover:bg-gray-50 text-sm"
+                                        >
+                                            <X size={14} /> 取消
+                                        </button>
+                                        <button 
+                                            onClick={handleSaveEdit}
+                                            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                                        >
+                                            <Save size={14} /> 保存
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ) : (
@@ -329,16 +465,79 @@ const App: React.FC = () => {
         </main>
 
         {/* Footer controls */}
-        <footer className="text-center">
-            <label className="inline-flex items-center gap-2 text-sm text-gray-500 cursor-pointer select-none">
+        <footer className="flex flex-col gap-3 py-4 border-t border-gray-100 w-full max-w-md mx-auto">
+            {/* Voice Selection */}
+            <div className="flex items-center gap-2 text-sm text-gray-600 w-full px-4">
+                <Mic size={16} className="text-gray-400 shrink-0" />
+                <span className="shrink-0 w-10">发音</span>
+                <select 
+                    value={selectedVoiceURI} 
+                    onChange={handleVoiceChange}
+                    className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-sm focus:ring-1 focus:ring-blue-500 outline-none truncate"
+                >
+                    {/* Always show Google option */}
+                    <option value={GOOGLE_VOICE_URI}>Google Translate (Online)</option>
+                    
+                    {/* Show browser voices if available */}
+                    {voices.length > 0 && (
+                        <optgroup label="本地语音 (离线)">
+                            {voices.map(v => (
+                                <option key={v.voiceURI} value={v.voiceURI}>
+                                    {v.name}
+                                </option>
+                            ))}
+                        </optgroup>
+                    )}
+                </select>
+            </div>
+            
+            {/* Speech Rate Selection */}
+            <div className="flex items-center gap-2 text-sm text-gray-600 w-full px-4">
+                <Gauge size={16} className="text-gray-400 shrink-0" />
+                <span className="shrink-0 w-10">语速</span>
                 <input 
-                    type="checkbox" 
-                    checked={autoPlay} 
-                    onChange={(e) => setAutoPlay(e.target.checked)}
-                    className="rounded text-blue-600 focus:ring-blue-500"
+                    type="range" 
+                    min="0.5" 
+                    max="1.5" 
+                    step="0.1" 
+                    value={speechRate}
+                    onChange={handleRateChange}
+                    className="flex-1 accent-blue-600 h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer"
                 />
-                自动播放问题读音
-            </label>
+                <span className="shrink-0 w-8 text-right font-mono text-xs">{speechRate.toFixed(1)}x</span>
+            </div>
+
+             {/* Gender Selection */}
+             <div className="flex items-center gap-2 text-sm text-gray-600 w-full px-4">
+                <User size={16} className="text-gray-400 shrink-0" />
+                <span className="shrink-0 w-10">性别</span>
+                <div className="flex bg-gray-200 rounded-lg p-0.5">
+                    <button
+                        onClick={() => { setGender('M'); savePreferredGender('M'); }}
+                        className={`px-3 py-0.5 rounded-md text-xs font-medium transition-all ${gender === 'M' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                        男 (M)
+                    </button>
+                    <button
+                        onClick={() => { setGender('F'); savePreferredGender('F'); }}
+                        className={`px-3 py-0.5 rounded-md text-xs font-medium transition-all ${gender === 'F' ? 'bg-white text-pink-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+                    >
+                        女 (F)
+                    </button>
+                </div>
+            </div>
+
+            <div className="flex justify-center mt-2">
+                <label className="inline-flex items-center gap-2 text-sm text-gray-500 cursor-pointer select-none">
+                    <input 
+                        type="checkbox" 
+                        checked={autoPlay} 
+                        onChange={(e) => setAutoPlay(e.target.checked)}
+                        className="rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    自动播放问题读音
+                </label>
+            </div>
         </footer>
       </div>
     </div>
