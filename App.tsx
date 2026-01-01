@@ -9,7 +9,7 @@ import {
     getPreferredGender, savePreferredGender
 } from './services/storage';
 import { selectNextQuestion } from './services/algorithm';
-import { speakRussian, GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, VoiceOption } from './services/tts';
+import { speakRussian, GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI, VoiceOption } from './services/tts';
 import { Volume2, RefreshCw, Brain, Eye, CheckCircle, XCircle, RotateCcw, Edit2, Save, X, Undo2, LayoutList, Highlighter, Mic, Gauge, User } from 'lucide-react';
 import ProgressBar from './components/ProgressBar';
 import QuestionList from './components/QuestionList';
@@ -71,20 +71,16 @@ const App: React.FC = () => {
           
           // Logic to handle saved URI or migrate legacy keys
           if (savedURI === 'online-google-translate') {
-             // Migrate old key to new constant
              setSelectedVoiceURI(GOOGLE_VOICE_URI);
           } else if (savedURI === 'online-youdao') {
-             // Explicit match for youdao from previous version
              setSelectedVoiceURI(YOUDAO_VOICE_URI);
-          } else if ([GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI].includes(savedURI || '')) {
+          } else if ([GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI].includes(savedURI || '')) {
              setSelectedVoiceURI(savedURI!);
           } else if (savedURI && savedVoiceExists) {
               setSelectedVoiceURI(savedURI);
           } else {
               // Default Strategy:
-              // 1. Try Youdao (Good for China)
-              // 2. If browser has Russian voice, maybe use that?
-              // Let's default to Youdao as requested for stability in China
+              // Prefer Youdao or Sogou for CN stability
               setSelectedVoiceURI(YOUDAO_VOICE_URI);
           }
       };
@@ -118,6 +114,9 @@ const App: React.FC = () => {
       }
       if (selectedVoiceURI === BAIDU_VOICE_URI) {
           return { name: 'Baidu TTS', voiceURI: BAIDU_VOICE_URI, lang: 'ru-RU' };
+      }
+      if (selectedVoiceURI === SOGOU_VOICE_URI) {
+          return { name: 'Sogou TTS', voiceURI: SOGOU_VOICE_URI, lang: 'ru-RU' };
       }
       return voices.find(v => v.voiceURI === selectedVoiceURI) || null;
   }
@@ -171,6 +170,8 @@ const App: React.FC = () => {
           newVoice = { name: 'Youdao Dictionary', voiceURI: YOUDAO_VOICE_URI, lang: 'ru-RU' };
       } else if (uri === BAIDU_VOICE_URI) {
           newVoice = { name: 'Baidu TTS', voiceURI: BAIDU_VOICE_URI, lang: 'ru-RU' };
+      } else if (uri === SOGOU_VOICE_URI) {
+          newVoice = { name: 'Sogou TTS', voiceURI: SOGOU_VOICE_URI, lang: 'ru-RU' };
       } else {
           newVoice = voices.find(v => v.voiceURI === uri) || null;
       }
@@ -489,6 +490,7 @@ const App: React.FC = () => {
                     className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-sm focus:ring-1 focus:ring-blue-500 outline-none truncate"
                 >
                     <option value={YOUDAO_VOICE_URI}>有道词典 (国内推荐)</option>
+                    <option value={SOGOU_VOICE_URI}>搜狗翻译 (国内推荐 - 高质量)</option>
                     <option value={GOOGLE_VOICE_URI}>Google (需翻墙 - 效果佳)</option>
                     <option value={BAIDU_VOICE_URI}>百度 (备用)</option>
                     
