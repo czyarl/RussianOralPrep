@@ -9,8 +9,10 @@ export interface QuestionData {
 export interface UserStats {
   attempts: number;
   correct: number;
-  hesitant?: number; // New: Number of times answered correctly but hesitantly
+  hesitant?: number; 
   lastAttemptAt: number; // timestamp
+  lastAttemptTurn?: number; // New: Logic counter (turn number) when this was last answered
+  streak?: number; // Consecutive perfect answers
 }
 
 export type HistoryMap = Record<number, UserStats>;

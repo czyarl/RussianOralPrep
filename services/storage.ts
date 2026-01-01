@@ -23,16 +23,31 @@ export const saveAttempt = (questionId: number, result: 'fail' | 'hesitant' | 'p
     correct: 0,
     hesitant: 0,
     lastAttemptAt: 0,
+    streak: 0,
+    lastAttemptTurn: 0
   };
 
   const isCorrect = result !== 'fail';
   const isHesitant = result === 'hesitant';
+  const isPerfect = result === 'perfect';
+
+  // Streak logic
+  const currentStreak = currentStats.streak || 0;
+  const newStreak = isPerfect ? currentStreak + 1 : 0;
+
+  // Calculate Global Turn
+  // We sum up all attempts from all questions to get the current "logical time".
+  // Adding 1 because this current attempt counts as the new turn.
+  const globalAttempts = Object.values(history).reduce((sum, stats) => sum + stats.attempts, 0);
+  const currentTurn = globalAttempts + 1;
 
   const newStats: UserStats = {
     attempts: currentStats.attempts + 1,
     correct: isCorrect ? currentStats.correct + 1 : currentStats.correct,
     hesitant: isHesitant ? (currentStats.hesitant || 0) + 1 : (currentStats.hesitant || 0),
     lastAttemptAt: Date.now(),
+    lastAttemptTurn: currentTurn,
+    streak: newStreak
   };
 
   const updatedHistory = {
@@ -47,8 +62,6 @@ export const saveAttempt = (questionId: number, result: 'fail' | 'hesitant' | 'p
 export const resetHistory = () => {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(CUSTOM_ANSWERS_KEY);
-    // Note: We usually keep preferences like voice/gender intact during a progress reset,
-    // unless a "Hard Factory Reset" is requested.
     window.location.reload();
 }
 
@@ -83,7 +96,7 @@ export const savePreferredVoiceURI = (uri: string) => {
 
 export const getPreferredRate = (): number => {
   const val = localStorage.getItem(RATE_PREF_KEY);
-  return val ? parseFloat(val) : 0.9; // Default to 0.9 if not set
+  return val ? parseFloat(val) : 0.9;
 };
 
 export const savePreferredRate = (rate: number) => {
@@ -92,7 +105,7 @@ export const savePreferredRate = (rate: number) => {
 
 export const getPreferredGender = (): Gender => {
   const val = localStorage.getItem(GENDER_PREF_KEY);
-  return (val === 'F') ? 'F' : 'M'; // Default to Male if not set
+  return (val === 'F') ? 'F' : 'M';
 };
 
 export const savePreferredGender = (gender: Gender) => {
@@ -132,16 +145,13 @@ export const importSaveData = (jsonString: string): boolean => {
     try {
         const data: SaveData = JSON.parse(jsonString);
         
-        // Basic validation
         if (!data.history || !data.customAnswers) {
             throw new Error("Invalid save file format");
         }
 
-        // Restore Data
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data.history));
         localStorage.setItem(CUSTOM_ANSWERS_KEY, JSON.stringify(data.customAnswers));
         
-        // Restore Preferences
         if (data.preferences) {
             if (data.preferences.voice) localStorage.setItem(VOICE_PREF_KEY, data.preferences.voice);
             if (data.preferences.rate) localStorage.setItem(RATE_PREF_KEY, data.preferences.rate.toString());
