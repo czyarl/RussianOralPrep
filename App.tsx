@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { getQuestions } from './constants';
 import { StudyMode, CardState, HistoryMap, QuestionData, Gender } from './types';
 import { 
-    getHistory, saveAttempt, resetHistory, 
+    getHistory, saveAttempt, 
     getCustomAnswers, saveCustomAnswer, 
     getPreferredVoiceURI, savePreferredVoiceURI,
     getPreferredRate, savePreferredRate,
@@ -10,9 +10,10 @@ import {
 } from './services/storage';
 import { selectNextQuestion } from './services/algorithm';
 import { speakRussian, GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI, VoiceOption } from './services/tts';
-import { Volume2, RefreshCw, Brain, Eye, CheckCircle, XCircle, RotateCcw, Edit2, Save, X, Undo2, LayoutList, Highlighter, Mic, Gauge, User } from 'lucide-react';
+import { Volume2, RefreshCw, Brain, Eye, CheckCircle, XCircle, Edit2, Save, X, Undo2, LayoutList, Highlighter, Mic, Gauge, User, Settings, AlertTriangle, Sparkles } from 'lucide-react';
 import ProgressBar from './components/ProgressBar';
 import QuestionList from './components/QuestionList';
+import SaveManager from './components/SaveManager';
 
 const App: React.FC = () => {
   const [history, setHistory] = useState<HistoryMap>({});
@@ -22,6 +23,7 @@ const App: React.FC = () => {
   const [cardState, setCardState] = useState<CardState>(CardState.LISTENING);
   const [autoPlay, setAutoPlay] = useState(true);
   const [showList, setShowList] = useState(false);
+  const [showSaveManager, setShowSaveManager] = useState(false);
   
   // Settings State
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -64,24 +66,29 @@ const App: React.FC = () => {
           setVoices(ruVoices);
 
           // Try to restore saved preference
-          const savedURI = getPreferredVoiceURI();
+          let savedURI = getPreferredVoiceURI();
           
+          // Legacy migration: If saved URI was the now-deleted StreamElements, reset it.
+          if (savedURI === 'online-streamelements') {
+              savedURI = ""; // Reset to default
+          }
+
           // Check if saved URI matches a browser voice OR is one of our special Online ones
           const savedVoiceExists = ruVoices.find(v => v.voiceURI === savedURI);
           
-          // Logic to handle saved URI or migrate legacy keys
-          if (savedURI === 'online-google-translate') {
-             setSelectedVoiceURI(GOOGLE_VOICE_URI);
-          } else if (savedURI === 'online-youdao') {
-             setSelectedVoiceURI(YOUDAO_VOICE_URI);
-          } else if ([GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI].includes(savedURI || '')) {
+          if ([GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI].includes(savedURI || '')) {
              setSelectedVoiceURI(savedURI!);
           } else if (savedURI && savedVoiceExists) {
               setSelectedVoiceURI(savedURI);
+          } else if (ruVoices.length > 0) {
+              // Default to the first Google or Microsoft voice if available, otherwise first Russian voice
+              const bestVoice = ruVoices.find(v => v.name.includes('Google')) || 
+                                ruVoices.find(v => v.name.includes('Microsoft')) || 
+                                ruVoices[0];
+              setSelectedVoiceURI(bestVoice.voiceURI);
           } else {
-              // Default Strategy:
-              // Prefer Youdao or Sogou for CN stability
-              setSelectedVoiceURI(YOUDAO_VOICE_URI);
+              // Fallback if no local voices found (rare)
+              setSelectedVoiceURI(GOOGLE_VOICE_URI);
           }
       };
 
@@ -123,23 +130,23 @@ const App: React.FC = () => {
 
   // Handle TTS Autoplay
   useEffect(() => {
-    if (autoPlay && currentQuestion && cardState === CardState.LISTENING && !showList) {
+    if (autoPlay && currentQuestion && cardState === CardState.LISTENING && !showList && !showSaveManager) {
       // Small timeout to allow UI to settle
       const timer = setTimeout(() => {
-        speakRussian(currentQuestion.question, getActiveVoice(), speechRate);
+        speakRussian(currentQuestion.question, getActiveVoice(), speechRate, gender);
       }, 300);
       return () => clearTimeout(timer);
     }
-  }, [currentQuestion, cardState, autoPlay, showList, selectedVoiceURI, voices, speechRate]); // Re-run if voice/rate changes
+  }, [currentQuestion, cardState, autoPlay, showList, showSaveManager, selectedVoiceURI, voices, speechRate, gender]); 
 
-  const handleNext = useCallback((isCorrect: boolean) => {
+  const handleNext = useCallback((result: 'fail' | 'hesitant' | 'perfect') => {
     if (!currentQuestion) return;
 
     // Reset editing state
     setIsEditing(false);
 
     // Save result
-    const newHistory = saveAttempt(currentQuestion.id, isCorrect);
+    const newHistory = saveAttempt(currentQuestion.id, result);
     setHistory(newHistory);
 
     // Pick next using the CURRENT questions list (which respects gender)
@@ -148,13 +155,17 @@ const App: React.FC = () => {
     setCardState(CardState.LISTENING);
   }, [currentQuestion, mode, questions]);
 
+  const toggleMode = () => {
+    setMode(prev => prev === StudyMode.SMART ? StudyMode.RANDOM : StudyMode.SMART);
+  };
+
   const handleReveal = () => {
     setCardState(CardState.REVEALED);
   };
 
   const handlePlayAudio = (e: React.MouseEvent, text: string) => {
     e.stopPropagation();
-    speakRussian(text, getActiveVoice(), speechRate);
+    speakRussian(text, getActiveVoice(), speechRate, gender);
   };
 
   const handleVoiceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -176,7 +187,7 @@ const App: React.FC = () => {
           newVoice = voices.find(v => v.voiceURI === uri) || null;
       }
       
-      speakRussian("Проверка звука", newVoice, speechRate);
+      speakRussian("Проверка звука", newVoice, speechRate, gender);
   }
 
   const handleRateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -184,23 +195,6 @@ const App: React.FC = () => {
       setSpeechRate(newRate);
       savePreferredRate(newRate);
   };
-
-  const handleGenderToggle = () => {
-      const newGender = gender === 'M' ? 'F' : 'M';
-      setGender(newGender);
-      savePreferredGender(newGender);
-  };
-
-  const toggleMode = () => {
-    const newMode = mode === StudyMode.RANDOM ? StudyMode.SMART : StudyMode.RANDOM;
-    setMode(newMode);
-  };
-
-  const handleReset = () => {
-      if(window.confirm("确定要清除所有学习进度（包括自定义答案）吗？")) {
-          resetHistory();
-      }
-  }
 
   // Custom Answer Handlers
   const handleStartEdit = () => {
@@ -273,6 +267,11 @@ const App: React.FC = () => {
             onClose={() => setShowList(false)}
         />
       )}
+      
+      {showSaveManager && (
+          <SaveManager onClose={() => setShowSaveManager(false)} />
+      )}
+
       <div className="w-full max-w-md flex flex-col h-full">
         
         {/* Header */}
@@ -288,11 +287,11 @@ const App: React.FC = () => {
                     <LayoutList size={20} />
                 </button>
                 <button 
-                    onClick={handleReset}
-                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-white hover:shadow-sm rounded-full transition-all"
-                    title="重置进度"
+                    onClick={() => setShowSaveManager(true)}
+                    className="p-2 text-gray-600 hover:bg-white hover:shadow-sm rounded-full transition-all"
+                    title="存档管理"
                 >
-                    <RotateCcw size={20} />
+                    <Settings size={20} />
                 </button>
             </div>
           </div>
@@ -457,20 +456,29 @@ const App: React.FC = () => {
                   查看答案
                 </button>
               ) : (
-                <div className="grid grid-cols-2 gap-4">
+                <div className="flex gap-2 w-full">
                   <button
-                    onClick={() => handleNext(false)}
-                    className="py-4 bg-white border border-red-100 text-red-600 hover:bg-red-50 rounded-xl font-bold text-lg transition-colors flex items-center justify-center gap-2"
+                    onClick={() => handleNext('fail')}
+                    className="flex-1 py-4 bg-white border border-red-100 text-red-600 hover:bg-red-50 rounded-xl font-bold text-lg transition-colors flex flex-col items-center justify-center gap-1"
                   >
                     <XCircle size={20} />
-                    没反应过来
+                    <span className="text-xs font-normal">没反应过来</span>
                   </button>
+
                   <button
-                    onClick={() => handleNext(true)}
-                    className="py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-emerald-200 transition-all flex items-center justify-center gap-2"
+                    onClick={() => handleNext('hesitant')}
+                    className="flex-1 py-4 bg-amber-50 border border-amber-200 text-amber-600 hover:bg-amber-100 rounded-xl font-bold text-lg transition-colors flex flex-col items-center justify-center gap-1"
+                  >
+                    <AlertTriangle size={20} />
+                    <span className="text-xs font-normal">不熟练/想了一会</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleNext('perfect')}
+                    className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-lg shadow-lg shadow-emerald-200 transition-all flex flex-col items-center justify-center gap-1"
                   >
                     <CheckCircle size={20} />
-                    反应过来了
+                    <span className="text-xs font-normal text-emerald-100">熟练/反应快</span>
                   </button>
                 </div>
               )}
@@ -489,14 +497,9 @@ const App: React.FC = () => {
                     onChange={handleVoiceChange}
                     className="flex-1 bg-white border border-gray-200 rounded px-2 py-1 text-sm focus:ring-1 focus:ring-blue-500 outline-none truncate"
                 >
-                    <option value={YOUDAO_VOICE_URI}>有道词典 (国内推荐)</option>
-                    <option value={SOGOU_VOICE_URI}>搜狗翻译 (国内推荐 - 高质量)</option>
-                    <option value={GOOGLE_VOICE_URI}>Google (需翻墙 - 效果佳)</option>
-                    <option value={BAIDU_VOICE_URI}>百度 (备用)</option>
-                    
                     {/* Show browser voices if available */}
                     {voices.length > 0 && (
-                        <optgroup label="本地语音 (离线)">
+                        <optgroup label="本地/系统语音 (推荐)">
                             {voices.map(v => (
                                 <option key={v.voiceURI} value={v.voiceURI}>
                                     {v.name}
@@ -504,6 +507,13 @@ const App: React.FC = () => {
                             ))}
                         </optgroup>
                     )}
+                    
+                    <optgroup label="在线备用源">
+                        <option value={GOOGLE_VOICE_URI}>Google (Online)</option>
+                        <option value={YOUDAO_VOICE_URI}>有道 (Online)</option>
+                        <option value={SOGOU_VOICE_URI}>搜狗 (Online)</option>
+                        <option value={BAIDU_VOICE_URI}>百度 (Online)</option>
+                    </optgroup>
                 </select>
             </div>
             

@@ -13,15 +13,18 @@ const ProgressBar: React.FC<Props> = ({ history, questions }) => {
 
   questions.forEach(q => {
     const stats = history[q.id];
-    if (stats) {
-      // Simple heuristic: If accuracy > 80% and attempts >= 2, it's mastered
-      if (stats.attempts >= 1) {
-          const accuracy = stats.correct / stats.attempts;
-          if (accuracy > 0.8 && stats.attempts >= 2) {
-              mastered++;
-          } else {
-              learning++;
-          }
+    if (stats && stats.attempts > 0) {
+      // Strict Mastered Logic: 
+      // Must be correct AND fluent (perfect).
+      // 'perfects' = Total Correct - Total Hesitant.
+      const perfects = stats.correct - (stats.hesitant || 0);
+      const perfectRate = perfects / stats.attempts;
+      
+      // To be mastered, >80% of attempts must be PERFECT (not just correct)
+      if (perfectRate > 0.8 && stats.attempts >= 2) {
+          mastered++;
+      } else {
+          learning++;
       }
     }
   });
@@ -31,8 +34,8 @@ const ProgressBar: React.FC<Props> = ({ history, questions }) => {
   return (
     <div className="w-full flex flex-col gap-2 mb-6">
       <div className="flex justify-between text-xs text-gray-500 font-medium">
-        <span>掌握: {mastered}</span>
-        <span>学习中: {learning}</span>
+        <span>已熟练: {mastered}</span>
+        <span>练习中: {learning}</span>
         <span>未学: {unattempted}</span>
       </div>
       <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden flex">
@@ -41,7 +44,7 @@ const ProgressBar: React.FC<Props> = ({ history, questions }) => {
           style={{ width: `${(mastered / total) * 100}%` }} 
         />
         <div 
-          className="bg-yellow-400 h-full transition-all duration-500" 
+          className="bg-amber-400 h-full transition-all duration-500" 
           style={{ width: `${(learning / total) * 100}%` }} 
         />
       </div>

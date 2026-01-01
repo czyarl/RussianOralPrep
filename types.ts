@@ -9,6 +9,7 @@ export interface QuestionData {
 export interface UserStats {
   attempts: number;
   correct: number;
+  hesitant?: number; // New: Number of times answered correctly but hesitantly
   lastAttemptAt: number; // timestamp
 }
 

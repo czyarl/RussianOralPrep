@@ -12,13 +12,18 @@ export const YOUDAO_VOICE_URI = 'online-youdao';
 export const BAIDU_VOICE_URI = 'online-baidu';
 export const SOGOU_VOICE_URI = 'online-sogou';
 
-export const speakRussian = (text: string, selectedVoice: VoiceOption | SpeechSynthesisVoice | null = null, rate: number = 0.9) => {
+export const speakRussian = async (
+    text: string, 
+    selectedVoice: VoiceOption | SpeechSynthesisVoice | null = null, 
+    rate: number = 0.9,
+    genderPreference: 'M' | 'F' = 'M' 
+) => {
   // 1. Cancel any ongoing browser speech
   if (window.speechSynthesis) {
     window.speechSynthesis.cancel();
   }
 
-  // 2. Cancel any ongoing audio playback
+  // 2. Cancel any ongoing audio element playback
   if (currentAudio) {
     currentAudio.pause();
     currentAudio.src = ""; // Detach source
@@ -29,41 +34,33 @@ export const speakRussian = (text: string, selectedVoice: VoiceOption | SpeechSy
 
   const voiceURI = selectedVoice ? selectedVoice.voiceURI : null;
 
-  // 3. Handle Online Voices
+  // --- STANDARD ONLINE TTS URLS (FALLBACKS) ---
   let url = '';
 
   if (voiceURI === GOOGLE_VOICE_URI) {
-      // Google Translate (Unofficial)
-      // Added client=tw-ob. With <meta name="referrer" content="no-referrer"> in index.html, this works much better.
       url = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=ru&client=tw-ob`;
   } else if (voiceURI === YOUDAO_VOICE_URI) {
-      // Youdao Dictionary - Requires no-referrer
       url = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(text)}&le=ru`;
   } else if (voiceURI === BAIDU_VOICE_URI) {
-      // Baidu Fanyi API - More stable than tts.baidu.com
-      // spd = speed (3 is normal), source = web
       url = `https://fanyi.baidu.com/gettts?lan=ru&text=${encodeURIComponent(text)}&spd=3&source=web`;
   } else if (voiceURI === SOGOU_VOICE_URI) {
-      // Sogou Translate - Excellent quality, works well in China
-      // from=translateweb, speaker=6 (Russian voice)
       url = `https://fanyi.sogou.com/reventondc/synthesis?text=${encodeURIComponent(text)}&speed=1&lang=ru&from=translateweb&speaker=6`;
   }
 
+  // If it's an online URL voice
   if (url) {
     try {
       const audio = new Audio(url);
       currentAudio = audio;
-      
-      // Attempt to set rate, though not all endpoints/browsers support it for remote streams
       audio.playbackRate = rate; 
       
       const playPromise = audio.play();
-      
       if (playPromise !== undefined) {
         playPromise.catch(e => {
-            // Ignore AbortError which happens when skipping quickly
             if (e.name === 'AbortError') return;
-            console.error(`Playback failed for ${voiceURI}`, e);
+            console.warn(`Online playback failed for ${voiceURI}, trying browser fallback.`, e);
+            // Fallback to browser synthesis if URL fails
+            speakBrowserNative(text, rate);
         });
       }
     } catch (e) {
@@ -72,32 +69,39 @@ export const speakRussian = (text: string, selectedVoice: VoiceOption | SpeechSy
     return;
   }
 
-  // 4. Fallback to Browser Native SpeechSynthesis
-  if (!window.speechSynthesis) {
-    console.warn("Speech synthesis not supported");
-    return;
-  }
-
-  const utterance = new SpeechSynthesisUtterance(text);
-  
-  // Check if the selected voice is a real browser voice (not one of our custom online URIs)
-  const isOnlineVoice = [GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI].includes(voiceURI || '');
-  
-  if (selectedVoice && !isOnlineVoice) {
-    // It's a real browser voice object
-    utterance.voice = selectedVoice as SpeechSynthesisVoice;
-  } else {
-    // Auto-detect a Russian voice if none specified or if falling back from online failure
-    const voices = window.speechSynthesis.getVoices();
-    const ruVoice = voices.find(v => v.lang.toLowerCase().includes('ru'));
-    if (ruVoice) {
-      utterance.voice = ruVoice;
-    }
-  }
-  
-  utterance.lang = 'ru-RU';
-  utterance.rate = rate; 
-  utterance.pitch = 1;
-
-  window.speechSynthesis.speak(utterance);
+  // --- BROWSER NATIVE SYNTHESIS (PRIMARY) ---
+  speakBrowserNative(text, rate, selectedVoice as SpeechSynthesisVoice);
 };
+
+// Helper for browser native speech
+const speakBrowserNative = (text: string, rate: number, preferredVoice?: SpeechSynthesisVoice) => {
+    if (!window.speechSynthesis) {
+        console.warn("Speech synthesis not supported");
+        return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'ru-RU';
+    utterance.rate = rate; 
+    utterance.pitch = 1;
+
+    // Use preferred voice if provided and it's not a custom online object
+    if (preferredVoice && preferredVoice.voiceURI && !preferredVoice.voiceURI.startsWith('online-')) {
+        utterance.voice = preferredVoice;
+    } else {
+        // Auto-select best available Russian voice
+        const voices = window.speechSynthesis.getVoices();
+        const ruVoices = voices.filter(v => v.lang.toLowerCase().includes('ru'));
+        
+        // Prioritize "Google" or "Microsoft" voices (usually higher quality)
+        const bestVoice = ruVoices.find(v => v.name.includes('Google')) || 
+                          ruVoices.find(v => v.name.includes('Microsoft')) || 
+                          ruVoices[0];
+                          
+        if (bestVoice) {
+            utterance.voice = bestVoice;
+        }
+    }
+
+    window.speechSynthesis.speak(utterance);
+}

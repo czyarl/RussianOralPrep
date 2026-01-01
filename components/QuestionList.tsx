@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, CheckCircle, Clock, Circle } from 'lucide-react';
+import { X, CheckCircle, Clock, Circle, AlertCircle } from 'lucide-react';
 import { HistoryMap, QuestionData } from '../types';
 
 interface Props {
@@ -14,8 +14,11 @@ const QuestionList: React.FC<Props> = ({ history, onSelect, onClose, currentId, 
   const getStatus = (id: number) => {
     const stats = history[id];
     if (!stats || stats.attempts === 0) return 'unattempted';
-    const accuracy = stats.correct / stats.attempts;
-    if (accuracy > 0.8 && stats.attempts >= 2) return 'mastered';
+    
+    const perfects = stats.correct - (stats.hesitant || 0);
+    const perfectRate = perfects / stats.attempts;
+    
+    if (perfectRate > 0.8 && stats.attempts >= 2) return 'mastered';
     return 'learning';
   };
 
@@ -46,9 +49,9 @@ const QuestionList: React.FC<Props> = ({ history, onSelect, onClose, currentId, 
             Icon = CheckCircle;
             iconColor = "text-emerald-500";
           } else if (status === 'learning') {
-            statusColor = "border-yellow-200 bg-yellow-50/50 hover:border-yellow-300";
-            Icon = Clock;
-            iconColor = "text-yellow-500";
+            statusColor = "border-amber-200 bg-amber-50/50 hover:border-amber-300";
+            Icon = AlertCircle; // Changed icon to represent 'learning/alert'
+            iconColor = "text-amber-500";
           }
           
           if (isCurrent) {
@@ -68,7 +71,8 @@ const QuestionList: React.FC<Props> = ({ history, onSelect, onClose, currentId, 
                  <div className="flex justify-between items-center mb-1">
                     <span className="text-xs font-mono text-gray-400">#{q.id}</span>
                     {stats && (
-                        <span className={`text-xs font-medium ${status === 'mastered' ? 'text-emerald-600' : 'text-gray-400'}`}>
+                        <span className={`text-xs font-medium ${status === 'mastered' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                           {/* Show Correct (including hesitant) / Total */}
                             {stats.correct}/{stats.attempts}
                         </span>
                     )}

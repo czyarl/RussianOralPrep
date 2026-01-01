@@ -22,18 +22,27 @@ export const selectNextQuestion = (
   }
 
   // SMART Mode: Weight items based on "needs practice"
-  // Score = (Failures * 3) - (Successes) + (Factor for never seen)
   const scoredQuestions = pool.map(q => {
     const stats = history[q.id];
     let score = 0;
 
     if (!stats) {
-      // Never seen: High priority
+      // Never seen: Highest priority
       score = 100;
     } else {
+      // Calculate Failures
       const failures = stats.attempts - stats.correct;
-      // High weight on failures
-      score = (failures * 5) - (stats.correct * 2);
+      const hesitant = stats.hesitant || 0;
+      
+      // WEIGHTING FORMULA:
+      // Failures (+5): Biggest signal to show again.
+      // Hesitant (+3): Strong signal to show again.
+      // Correct (-1): Reduces score, pushes it back.
+      // Note: 'stats.correct' includes 'hesitant' attempts in storage, 
+      // so if we are hesitant, net score change is +3 - 1 = +2 (Score goes up -> See again soon)
+      // If we are perfect, net score change is 0 - 1 = -1 (Score goes down -> See later)
+      
+      score = (failures * 5) + (hesitant * 3) - (stats.correct * 1);
       
       // Add 'staleness' factor: longer since last seen -> higher score
       const hoursSinceLastSeen = (Date.now() - stats.lastAttemptAt) / (1000 * 60 * 60);
@@ -44,7 +53,7 @@ export const selectNextQuestion = (
     return { ...q, score: score + Math.random() };
   });
 
-  // Sort descending by score
+  // Sort descending by score (Higher score = Needs practice more)
   scoredQuestions.sort((a, b) => b.score - a.score);
 
   // Pick from the top 5 candidates to keep it slightly unpredictable but focused
