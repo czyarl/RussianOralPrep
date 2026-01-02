@@ -57,9 +57,9 @@ export const selectNextQuestion = (
 
     if (!stats) {
       // --- Group: NEW ---
-      // Base: 600.
-      // Prioritize new cards reasonably high, but let urgent reviews overtake them.
-      score = 600; 
+      // Base: 900. (Increased from 600)
+      // This allows user to see more new cards before old cards overtake them.
+      score = 900; 
     } else {
       // Infer streak for legacy data
       let streak = stats.streak;
@@ -76,34 +76,33 @@ export const selectNextQuestion = (
       const lastTurn = stats.lastAttemptTurn || 0;
       const turnsSince = globalAttempts - lastTurn;
 
-      // WEIGHTS FOR CRAMMING
+      // WEIGHTS FOR CRAMMING (Revised for larger loop)
       
       if (streak === 0) {
           // --- Group: CRITICAL (Wrong/Hesitant) ---
-          // Base: 1000.
-          // Growth: +50 per turn.
-          // Will be very high priority almost immediately after cooldown.
-          score = 1000 + (turnsSince * 50);
+          // Base: 2000.
+          // These MUST interrupt the flow. If you got it wrong, do it again soon.
+          score = 2000 + (turnsSince * 100);
       } else if (streak === 1) {
           // --- Group: REVIEW 1 (Right once) ---
-          // Base: 500.
-          // Growth: +30 per turn.
-          // Needs 4 turns to reach 620 (beating New cards).
-          // Meaning: After doing ~4 other cards, this will pop up again.
+          // Base: 500. Growth: +30/turn.
+          // To beat "New" (900), needs gap of 400.
+          // 400 / 30 = ~13 turns.
+          // Result: After doing a new card, you won't see it again for ~13 turns.
+          // This expands the active loop from ~6 to ~13.
           score = 500 + (turnsSince * 30);
       } else if (streak === 2) {
            // --- Group: REVIEW 2 (Right twice) ---
-           // Base: 400.
-           // Growth: +20 per turn.
-           // Needs 10 turns to reach 600.
-           score = 400 + (turnsSince * 20);
+           // Base: 400. Growth: +15/turn.
+           // To beat "New" (900), needs gap of 500.
+           // 500 / 15 = ~33 turns.
+           // You basically won't see this until you finish the whole deck of 30.
+           score = 400 + (turnsSince * 15);
       } else {
           // --- Group: MASTERED (Right 3+ times) ---
-          // Base: 10.
-          // Growth: +10 per turn.
-          // Needs ~60 turns to reach 600.
-          // Effectively pushed to end of session.
-          score = 10 + (turnsSince * 10);
+          // Base: 100. Growth: +5/turn.
+          // Very low priority.
+          score = 100 + (turnsSince * 5);
       }
     }
 
