@@ -19,7 +19,8 @@ export type HistoryMap = Record<number, UserStats>;
 
 export enum StudyMode {
   RANDOM = 'RANDOM',
-  SMART = 'SMART' // Prioritize unseen or wrong answers
+  SMART = 'SMART', // Prioritize unseen or wrong answers
+  ORDERED = 'ORDERED' // Shuffle once, go through all, then reshuffle
 }
 
 export enum CardState {

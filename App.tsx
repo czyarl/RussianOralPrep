@@ -6,11 +6,12 @@ import {
     getCustomAnswers, saveCustomAnswer, 
     getPreferredVoiceURI, savePreferredVoiceURI,
     getPreferredRate, savePreferredRate,
-    getPreferredGender, savePreferredGender
+    getPreferredGender, savePreferredGender,
+    getOrderedQueue, saveOrderedQueue
 } from './services/storage';
-import { selectNextQuestion } from './services/algorithm';
+import { selectNextQuestion, getOrderedQuestion } from './services/algorithm';
 import { speakRussian, GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI, VoiceOption } from './services/tts';
-import { Volume2, RefreshCw, Brain, Eye, CheckCircle, XCircle, Edit2, Save, X, Undo2, LayoutList, Highlighter, Mic, Gauge, User, Settings, AlertTriangle, Sparkles } from 'lucide-react';
+import { Volume2, RefreshCw, Brain, Eye, CheckCircle, XCircle, Edit2, Save, X, Undo2, LayoutList, Highlighter, Mic, Gauge, User, Settings, AlertTriangle, Sparkles, Repeat } from 'lucide-react';
 import ProgressBar from './components/ProgressBar';
 import QuestionList from './components/QuestionList';
 import SaveManager from './components/SaveManager';
@@ -20,6 +21,7 @@ const App: React.FC = () => {
   const [customAnswers, setCustomAnswers] = useState<Record<number, string>>({});
   const [currentQuestion, setCurrentQuestion] = useState<QuestionData | null>(null);
   const [mode, setMode] = useState<StudyMode>(StudyMode.SMART);
+  const [orderedQueue, setOrderedQueue] = useState<number[]>([]);
   const [cardState, setCardState] = useState<CardState>(CardState.LISTENING);
   const [autoPlay, setAutoPlay] = useState(true);
   const [showList, setShowList] = useState(false);
@@ -43,17 +45,25 @@ const App: React.FC = () => {
   useEffect(() => {
     const loadedHistory = getHistory();
     const loadedCustomAnswers = getCustomAnswers();
+    const loadedQueue = getOrderedQueue();
+    
     setHistory(loadedHistory);
     setCustomAnswers(loadedCustomAnswers);
+    setOrderedQueue(loadedQueue);
     
     // Load prefs
     setSpeechRate(getPreferredRate());
     const savedGender = getPreferredGender();
     setGender(savedGender);
     
-    // Initial pick uses the saved gender immediately
+    // Initial pick
     const initialQuestions = getQuestions(savedGender);
-    const firstQ = selectNextQuestion(initialQuestions, loadedHistory, mode);
+    // Note: We default to SMART logic for the very first card on load if mode is SMART/RANDOM.
+    // If we want to persist mode, we'd need to save mode too. For now, defaulting to SMART start is fine,
+    // or if the user switches to ORDERED, it will kick in then.
+    // If we want to start immediately in ORDERED mode if that was the intent, we can't easily guess.
+    // We will just stick to Smart recommendation for the initial load.
+    const firstQ = selectNextQuestion(initialQuestions, loadedHistory, StudyMode.SMART);
     setCurrentQuestion(firstQ);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -68,12 +78,11 @@ const App: React.FC = () => {
           // Try to restore saved preference
           let savedURI = getPreferredVoiceURI();
           
-          // Legacy migration: If saved URI was the now-deleted StreamElements, reset it.
+          // Legacy migration
           if (savedURI === 'online-streamelements') {
-              savedURI = ""; // Reset to default
+              savedURI = ""; 
           }
 
-          // Check if saved URI matches a browser voice OR is one of our special Online ones
           const savedVoiceExists = ruVoices.find(v => v.voiceURI === savedURI);
           
           if ([GOOGLE_VOICE_URI, YOUDAO_VOICE_URI, BAIDU_VOICE_URI, SOGOU_VOICE_URI].includes(savedURI || '')) {
@@ -81,24 +90,19 @@ const App: React.FC = () => {
           } else if (savedURI && savedVoiceExists) {
               setSelectedVoiceURI(savedURI);
           } else if (ruVoices.length > 0) {
-              // Default to the first Google or Microsoft voice if available, otherwise first Russian voice
               const bestVoice = ruVoices.find(v => v.name.includes('Google')) || 
                                 ruVoices.find(v => v.name.includes('Microsoft')) || 
                                 ruVoices[0];
               setSelectedVoiceURI(bestVoice.voiceURI);
           } else {
-              // Fallback if no local voices found (rare)
               setSelectedVoiceURI(GOOGLE_VOICE_URI);
           }
       };
 
       loadVoices();
-      
-      // Chrome loads voices asynchronously
       if (window.speechSynthesis.onvoiceschanged !== undefined) {
           window.speechSynthesis.onvoiceschanged = loadVoices;
       }
-      
       return () => { window.speechSynthesis.onvoiceschanged = null; };
   }, []);
 
@@ -131,7 +135,6 @@ const App: React.FC = () => {
   // Handle TTS Autoplay
   useEffect(() => {
     if (autoPlay && currentQuestion && cardState === CardState.LISTENING && !showList && !showSaveManager) {
-      // Small timeout to allow UI to settle
       const timer = setTimeout(() => {
         speakRussian(currentQuestion.question, getActiveVoice(), speechRate, gender);
       }, 300);
@@ -142,21 +145,48 @@ const App: React.FC = () => {
   const handleNext = useCallback((result: 'fail' | 'hesitant' | 'perfect') => {
     if (!currentQuestion) return;
 
-    // Reset editing state
     setIsEditing(false);
 
     // Save result
     const newHistory = saveAttempt(currentQuestion.id, result);
     setHistory(newHistory);
 
-    // Pick next using the CURRENT questions list (which respects gender)
-    const nextQ = selectNextQuestion(questions, newHistory, mode, currentQuestion.id);
+    let nextQ: QuestionData;
+
+    // Pick next based on mode
+    if (mode === StudyMode.ORDERED) {
+        const { question, newQueue } = getOrderedQuestion(questions, orderedQueue);
+        nextQ = question;
+        setOrderedQueue(newQueue);
+        saveOrderedQueue(newQueue);
+    } else {
+        // SMART or RANDOM
+        nextQ = selectNextQuestion(questions, newHistory, mode, currentQuestion.id);
+    }
+
     setCurrentQuestion(nextQ);
     setCardState(CardState.LISTENING);
-  }, [currentQuestion, mode, questions]);
+  }, [currentQuestion, mode, questions, orderedQueue]);
 
   const toggleMode = () => {
-    setMode(prev => prev === StudyMode.SMART ? StudyMode.RANDOM : StudyMode.SMART);
+    // Cycle: SMART -> ORDERED -> RANDOM -> SMART
+    setMode(prev => {
+        if (prev === StudyMode.SMART) return StudyMode.ORDERED;
+        if (prev === StudyMode.ORDERED) return StudyMode.RANDOM;
+        return StudyMode.SMART;
+    });
+  };
+
+  const getModeIcon = () => {
+      if (mode === StudyMode.SMART) return <Brain size={14} />;
+      if (mode === StudyMode.ORDERED) return <Repeat size={14} />;
+      return <RefreshCw size={14} />;
+  };
+
+  const getModeLabel = () => {
+      if (mode === StudyMode.SMART) return '智能推荐';
+      if (mode === StudyMode.ORDERED) return '顺序循环';
+      return '随机模式';
   };
 
   const handleReveal = () => {
@@ -173,7 +203,6 @@ const App: React.FC = () => {
       setSelectedVoiceURI(uri);
       savePreferredVoiceURI(uri);
       
-      // Preview new voice
       let newVoice: VoiceOption | SpeechSynthesisVoice | null = null;
       if (uri === GOOGLE_VOICE_URI) {
           newVoice = { name: 'Google Translate', voiceURI: GOOGLE_VOICE_URI, lang: 'ru-RU' };
@@ -196,7 +225,6 @@ const App: React.FC = () => {
       savePreferredRate(newRate);
   };
 
-  // Custom Answer Handlers
   const handleStartEdit = () => {
     if (!currentQuestion) return;
     const currentAnswer = customAnswers[currentQuestion.id] || currentQuestion.answer;
@@ -220,7 +248,7 @@ const App: React.FC = () => {
       if (window.confirm("确定要恢复默认答案吗？")) {
         const newMap = saveCustomAnswer(currentQuestion.id, null);
         setCustomAnswers(newMap);
-        setIsEditing(false); // Stop editing if we were editing
+        setIsEditing(false);
       }
   }
 
@@ -230,8 +258,6 @@ const App: React.FC = () => {
         const end = textareaRef.current.selectionEnd;
         const newText = editText.slice(0, start) + '\u0301' + editText.slice(end);
         setEditText(newText);
-        
-        // Restore focus and move cursor after the stress mark
         setTimeout(() => {
             if(textareaRef.current) {
                 textareaRef.current.focus();
@@ -300,15 +326,18 @@ const App: React.FC = () => {
           
           <div className="flex justify-between items-center bg-white p-2 rounded-lg shadow-sm border border-gray-100">
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-semibold uppercase tracking-wider ${mode === StudyMode.SMART ? 'text-blue-600' : 'text-gray-400'}`}>
-                {mode === StudyMode.SMART ? '智能推荐' : '随机模式'}
+              <span className={`text-xs font-semibold uppercase tracking-wider ${
+                  mode === StudyMode.SMART ? 'text-blue-600' : 
+                  mode === StudyMode.ORDERED ? 'text-purple-600' : 'text-gray-500'
+              }`}>
+                {getModeLabel()}
               </span>
             </div>
             <button 
               onClick={toggleMode}
               className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-xs font-medium transition-colors"
             >
-              {mode === StudyMode.SMART ? <Brain size={14} /> : <RefreshCw size={14} />}
+              {getModeIcon()}
               切换模式
             </button>
           </div>
@@ -321,6 +350,11 @@ const App: React.FC = () => {
             {/* Question ID Badge */}
             <div className="absolute top-4 left-4 bg-gray-100 text-gray-500 text-xs font-mono px-2 py-1 rounded">
               #{currentQuestion.id}
+              {mode === StudyMode.ORDERED && orderedQueue.length >= 0 && (
+                  <span className="ml-1 text-purple-400 font-bold">
+                      [{30 - orderedQueue.length}/30]
+                  </span>
+              )}
             </div>
 
             {/* Content Container */}
@@ -360,7 +394,6 @@ const App: React.FC = () => {
                                 {hasCustomAnswer ? "我的回答" : "参考回答"}
                             </p>
                             
-                            {/* Answer Controls */}
                             {!isEditing && (
                                 <div className="flex gap-2">
                                      <button 

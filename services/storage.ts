@@ -2,6 +2,7 @@ import { HistoryMap, UserStats, Gender } from '../types';
 
 const STORAGE_KEY = 'russian-oral-history-v1';
 const CUSTOM_ANSWERS_KEY = 'russian-oral-custom-answers-v1';
+const ORDERED_QUEUE_KEY = 'russian-oral-ordered-queue-v1'; // New key for the queue
 const VOICE_PREF_KEY = 'russian-oral-voice-pref-v1';
 const RATE_PREF_KEY = 'russian-oral-voice-rate-v1';
 const GENDER_PREF_KEY = 'russian-oral-gender-v1';
@@ -36,8 +37,6 @@ export const saveAttempt = (questionId: number, result: 'fail' | 'hesitant' | 'p
   const newStreak = isPerfect ? currentStreak + 1 : 0;
 
   // Calculate Global Turn
-  // We sum up all attempts from all questions to get the current "logical time".
-  // Adding 1 because this current attempt counts as the new turn.
   const globalAttempts = Object.values(history).reduce((sum, stats) => sum + stats.attempts, 0);
   const currentTurn = globalAttempts + 1;
 
@@ -62,9 +61,25 @@ export const saveAttempt = (questionId: number, result: 'fail' | 'hesitant' | 'p
 export const resetHistory = () => {
     localStorage.removeItem(STORAGE_KEY);
     localStorage.removeItem(CUSTOM_ANSWERS_KEY);
+    localStorage.removeItem(ORDERED_QUEUE_KEY);
     window.location.reload();
 }
 
+// --- QUEUE MANAGEMENT FOR ORDERED MODE ---
+export const getOrderedQueue = (): number[] => {
+    try {
+        const raw = localStorage.getItem(ORDERED_QUEUE_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch (e) {
+        return [];
+    }
+};
+
+export const saveOrderedQueue = (queue: number[]) => {
+    localStorage.setItem(ORDERED_QUEUE_KEY, JSON.stringify(queue));
+};
+
+// --- CUSTOM ANSWERS ---
 export const getCustomAnswers = (): Record<number, string> => {
   try {
     const raw = localStorage.getItem(CUSTOM_ANSWERS_KEY);
@@ -85,6 +100,8 @@ export const saveCustomAnswer = (questionId: number, answer: string | null) => {
     localStorage.setItem(CUSTOM_ANSWERS_KEY, JSON.stringify(current));
     return current;
 };
+
+// --- PREFERENCES ---
 
 export const getPreferredVoiceURI = (): string | null => {
   return localStorage.getItem(VOICE_PREF_KEY);
@@ -117,6 +134,7 @@ export const savePreferredGender = (gender: Gender) => {
 interface SaveData {
     history: HistoryMap;
     customAnswers: Record<number, string>;
+    orderedQueue: number[];
     preferences: {
         voice: string | null;
         rate: number;
@@ -130,6 +148,7 @@ export const exportSaveData = (): string => {
     const data: SaveData = {
         history: getHistory(),
         customAnswers: getCustomAnswers(),
+        orderedQueue: getOrderedQueue(),
         preferences: {
             voice: getPreferredVoiceURI(),
             rate: getPreferredRate(),
@@ -151,6 +170,9 @@ export const importSaveData = (jsonString: string): boolean => {
 
         localStorage.setItem(STORAGE_KEY, JSON.stringify(data.history));
         localStorage.setItem(CUSTOM_ANSWERS_KEY, JSON.stringify(data.customAnswers));
+        if (data.orderedQueue) {
+            localStorage.setItem(ORDERED_QUEUE_KEY, JSON.stringify(data.orderedQueue));
+        }
         
         if (data.preferences) {
             if (data.preferences.voice) localStorage.setItem(VOICE_PREF_KEY, data.preferences.voice);
